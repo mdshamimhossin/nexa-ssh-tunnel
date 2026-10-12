@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $EUID -eq 0 ]] || { echo 'Run: sudo nexa'; exit 1; }
+valid_user() { [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] && [[ "$1" != root && "$1" != ubuntu && "$1" != debian ]]; }
+create_user() {
+ read -rp 'New SSH username: ' name
+ valid_user "$name" || { echo 'Invalid/reserved name'; return; }
+ id "$name" &>/dev/null && { echo 'Already exists'; return; }
+ useradd -m -s /bin/bash "$name"
+ passwd "$name"
+ echo "Created $name"
+}
+delete_user() {
+ read -rp 'Username to delete: ' name
+ valid_user "$name" || { echo 'Invalid/reserved name'; return; }
+ id "$name" &>/dev/null || { echo 'Not found'; return; }
+ read -rp "Delete $name and home directory? Type YES: " yes
+ [[ "$yes" == YES ]] && userdel -r "$name" || true
+}
+while :; do
+ cat <<'MENU'
+
+====== NEXA SSH TUNNEL ======
+1) Create SSH user
+2) Delete SSH user
+3) Change SSH password
+4) Lock SSH user
+5) Unlock SSH user
+6) Active SSH usernames
+7) Port 443 connections
+8) Service status
+9) Restart service
+10) View service logs
+0) Exit
+MENU
+ read -rp 'Choice: ' choice
+ case "$choice" in
+  1) create_user;;
+  2) delete_user;;
+  3|4|5) read -rp 'Username: ' name; valid_user "$name" && id "$name" &>/dev/null || { echo 'Invalid user'; continue; }; case "$choice" in 3) passwd "$name";; 4) passwd -l "$name";; 5) passwd -u "$name";; esac;;
+  6) ps -eo args= | awk '/^sshd: / && !/\[priv\]|\[net\]|\[listener\]|\[accepted\]|unknown/ {print $2}' | sed 's/@.*//' | sort | uniq -c;;
+  7) ss -Htn state established '( sport = :443 )' | wc -l;;
+  8) systemctl --no-pager status nexa-ssh || true;;
+  9) systemctl restart nexa-ssh;;
+  10) journalctl -u nexa-ssh -n 60 --no-pager;;
+  0) exit 0;;
+  *) echo 'Invalid choice';;
+ esac
+done
